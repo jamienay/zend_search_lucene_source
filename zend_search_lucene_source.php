@@ -1,4 +1,15 @@
 <?php
+/**
+* Zend_Search_Lucene Datasource for CakePHP 1.2/1.3
+*
+* A datasource for the Zend_Search_Lucene search index.
+*
+* @filesource
+* @author Jamie Nay
+* @copyright Jamie Nay
+* @license http://www.opensource.org/licenses/mit-license.php The MIT License
+* @link http://jamienay.com/2010/01/zend_search_lucene-datasource-for-cakephp
+*/
 class ZendSearchLuceneSource extends DataSource {
     public $description = 'Zend_Search_Lucene index interface';
     public $indexFile = null;
@@ -11,11 +22,11 @@ class ZendSearchLuceneSource extends DataSource {
     }
     
 	function read(&$model, $queryData = array()) {
-		$items = $this->__readData($queryData['conditions']);
+		$items = $this->__readData(&$model, $queryData);
 		
 		if ($items) {
 			$items = $this->__getPage($items, $queryData);
-		
+			
 			// A request for a count (from paginate or otherwise).
 			if ( Set::extract($queryData, 'fields') == '__count' ) {
 				return array(array($model->alias => array('count' => count($items))));
@@ -63,22 +74,42 @@ class ZendSearchLuceneSource extends DataSource {
     	$this->__index = Zend_Search_Lucene::create($path);
     }
    
-    private function __readData($queryData) {
-		//$data = $this->__index->find($queryData['query']);
-		$query = Zend_Search_Lucene_Search_QueryParser::parse($queryData['query']);
+    private function __readData(&$model, $queryData) {
+    	$highlight = false;
+    	if (isset($queryData['highlight']) && $queryData['highlight'] == true) {
+    		$highlight = true;
+    	}
+    	
+		$query = Zend_Search_Lucene_Search_QueryParser::parse($queryData['conditions']['query']);
 		$hits = $this->__index->find($query);
 		
 		$data = array();
 		foreach ($hits as $i => $hit) {
-			$data[$i] = array(
-				'url' => $hit->url,
-				'name' => $query->highlightMatches($hit->name),
-				'description' => $query->highlightMatches($hit->description),
-				'type' => $hit->type
-			);
+			$fields = $this->__getFieldInfo($hit->getDocument());
+			
+			$returnArray = array();
+			foreach ($fields as $field) {
+				if ($highlight && $field->isIndexed == 1) {
+					$returnArray[$field->name] = $query->highlightMatches($hit->{$field->name});
+				} else {
+					$returnArray[$field->name] = $hit->{$field->name};
+				}
+			}
+
+			$data[$i][$model->alias] = $returnArray;
 		}
 		return $data;
-	} 
+	}
+	
+	private function __getFieldInfo(Zend_Search_Lucene_Document $doc) {
+		$fieldNames = $doc->getFieldNames();
+		$fields = array();
+		foreach ($fieldNames as $fieldName) {
+			$fields[] = $doc->getField($fieldName);
+		}
+		
+		return $fields;
+	}
 	
 	private function __delete($index = null) {
 		if (!$index) {
@@ -120,5 +151,4 @@ class ZendSearchLuceneSource extends DataSource {
 	}
 
 }
-
 ?>
