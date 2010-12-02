@@ -103,6 +103,14 @@ class ZendSearchLuceneSource extends DataSource {
 		return $this->sources;
 	}
 	
+	public function setMergeFactor($num) {
+		$this->__index->setMergeFactor($num);
+	}
+	
+	public function optimize() {
+		$this->__index->optimize();
+	}
+	
 	private function __createSearchDocument() {
 		return new Zend_Search_Lucene_Document();
 	}
