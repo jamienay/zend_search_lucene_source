@@ -1,10 +1,20 @@
 <?php
-class ZendSearchLucene extends DataSource {
+
+App::import('Vendor', 'Zend_Search_Lucene', array('file' => 'Zend' . DS . 'Search' . DS . 'Lucene.php'));
+
+class ZendSearchLuceneSource extends DataSource {
+
     public $description = 'Zend_Search_Lucene index interface';
     
     public $indexFile = null;
+
+	public $indexDirectory = null;
     
     protected $_schema = array(
+		'id' => array(
+			'type' => 'integer',
+			'length' => 10,
+		),
     	'document' => array()
     );
     
@@ -16,8 +26,14 @@ class ZendSearchLucene extends DataSource {
     public function __construct($config) {
     	$this->indexFile = $config['indexFile'];
     	$this->__setSources($config['source']);
-    	$this->__loadIndex(TMP.$this->indexFile);
-        parent::__construct($config);
+		
+		$this->indexDirectory = TMP;
+		if (!empty($config['indexDirectory'])) {
+			$this->indexDirectory = $config['indexDirectory'];
+		}
+    	$this->__loadIndex($this->indexDirectory . $this->indexFile);
+        
+		parent::__construct($config);
     }
 
 	public function read(&$model, $queryData = array()) {
@@ -79,13 +95,6 @@ class ZendSearchLucene extends DataSource {
 	
 	}
 	
-	/**
-	 * This is just here, empty log array and all, for DebugKit compatibility.
-	 */
-	public function getLog() {
-		return array('log' => array());
-	}
-	
 	public function describe(&$model) {
 		return $this->_schema;
 	}
@@ -122,6 +131,8 @@ class ZendSearchLucene extends DataSource {
 					$returnArray[$field->name] = $hit->{$field->name};
 				}
 			}
+			
+			$returnArray['id'] = $hit->id;
 
 			$data[$i][$model->alias] = $returnArray;
 		}
@@ -145,7 +156,7 @@ class ZendSearchLucene extends DataSource {
 	
 	private function __delete($index = null) {
 		if (!$index) {
-			return $this->__createIndex(TMP.$this->indexFile);
+			return $this->__createIndex($this->indexDirectory . $this->indexFile);
 		} else {
 			return $this->__index->delete($index);
 		}
