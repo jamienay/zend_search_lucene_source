@@ -148,7 +148,19 @@ class ZendSearchLuceneSource extends DataSource {
 	}
 	
 	private function __parseQuery($queryData) {
-		$queryString = $queryData['conditions']['query'];
+		if (isset($queryData['conditions']['query'])) {
+			$queryString = $queryData['conditions']['query'];
+		} else {
+			$conditions = array();
+			foreach ($queryData['conditions'] as $key => $val) {
+				if (strpos($key, '.') !== false) {
+					list(, $key) = explode('.', $key, 2);
+				}
+				$conditions[] = "$key:$val";
+			}
+			$queryString = join(' ', $conditions);
+		}
+
     	return Zend_Search_Lucene_Search_QueryParser::parse($queryString);
 	}
 	
