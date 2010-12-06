@@ -37,21 +37,25 @@ class ZendSearchLuceneSource extends DataSource {
     }
 
 	public function read(&$model, $queryData = array()) {
-		$items = $this->__readData(&$model, $queryData);
-		if ($items) {
-			$items = $this->__getPage($items, $queryData);
-			
-			// A request for a count (from paginate or otherwise).
-			if ( Set::extract($queryData, 'fields') == '__count' ) {
-				return array(array($model->alias => array('count' => count($items))));
+		$this->_startLog();
+		
+		try {
+			$items = $this->__readData(&$model, $queryData);
+			if ($items) {
+				$items = $this->__getPage($items, $queryData);
+				$this->numRows = count($items);
 			}
-		} else {
-			// A request for a count (from paginate or otherwise).
-			if (Set::extract($queryData, 'fields') == '__count') {
-				return array(array($model->alias => array('count' => count($items))));
-			}
+		} catch (Zend_Exception $e) {
+			$this->error = $e->getMessage();
+			$items = false;
 		}
-	
+
+		if (Set::extract($queryData, 'fields') == '__count') {
+			$items = array(array($model->alias => array('count' => count($items))));
+		}
+
+		$this->_closeLog();
+
 		return $items;
 	}
 
@@ -161,6 +165,7 @@ class ZendSearchLuceneSource extends DataSource {
 			}
 			$queryString = join(' ', $conditions);
 		}
+		$this->query = $queryString;
 
     	return Zend_Search_Lucene_Search_QueryParser::parse($queryString);
 	}
@@ -220,6 +225,51 @@ class ZendSearchLuceneSource extends DataSource {
     	return $this->sources;
     }
 
+	protected function _startLog() {
+		$this->__queryStart = microtime(true);
+		$this->query = $this->error = $this->affected = $this->numRows = $this->took = null;
+	}
+
+	protected function _closeLog() {
+		if (!isset($this->__queryStart)) {
+			trigger_error('Was asked to close log, but log was not started.');
+		}
+		
+		$this->took = round((microtime(true) - $this->__queryStart) * 1000);
+		$this->__queryStart = null;
+		$this->_queriesTime += $this->took;
+		$this->_queriesCnt++;
+		
+		if ($this->numRows === null) {
+			$this->numRows = 0;
+		}
+		if (!$this->error) {
+			$this->error = false;
+		}
+		
+		$this->_queriesLog[] = array(
+			'query'		=> $this->query,
+			'error'		=> $this->error,
+			'affected'	=> $this->affected,
+			'numRows'	=> $this->numRows,
+			'took'		=> $this->took,
+		);
+	}
+	
+	public function getLog($sorted = false, $clear = true) {
+		$log = $this->_queriesLog;
+
+		if ($sorted) {
+			$log = sortByKey($log, 'took', 'desc', SORT_NUMERIC);
+		}
+
+		if ($clear) {
+			$this->_queriesLog = array();
+		}
+		
+		return array('log' => $log, 'count' => $this->_queriesCnt, 'time' => $this->_queriesTime);
+	}
+	
 }
 
 ?>
