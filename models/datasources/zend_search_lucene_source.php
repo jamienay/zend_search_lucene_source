@@ -56,8 +56,9 @@ class ZendSearchLuceneSource extends DataSource {
 	}
 
 	public function delete(&$model, $id = null) {
+		$id = current((array)$id);
 		if (!$id) {
-			return $this->__delete();
+			return false;
 		}
 		
 		return $this->__delete($id);
