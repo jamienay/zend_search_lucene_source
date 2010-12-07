@@ -33,6 +33,8 @@ class ZendSearchLuceneSource extends DataSource {
 		}
     	$this->__loadIndex($this->indexDirectory . $this->indexFile);
         
+		Zend_Search_Lucene_Search_QueryParser::setDefaultEncoding(strtolower(Configure::read('App.encoding')));
+
 		parent::__construct($config);
     }
 
@@ -129,7 +131,16 @@ class ZendSearchLuceneSource extends DataSource {
     	if (isset($queryData['highlight']) && $queryData['highlight'] == true) {
     		$highlight = true;
     	}
+		
+		$limit = 1000;
+		if (!empty($queryData['limit'])) {
+			$limit = $queryData['limit'];
+		}
+
     	$query = $this->__parseQuery($queryData);
+
+		Zend_Search_Lucene::setResultSetLimit($limit);
+
 		$hits = $this->__index->find($query);
 
 		$data = array();
@@ -146,6 +157,7 @@ class ZendSearchLuceneSource extends DataSource {
 			}
 			
 			$returnArray['id'] = $hit->id;
+			$returnArray['score'] = $hit->score;
 
 			$data[$i][$model->alias] = $returnArray;
 		}
