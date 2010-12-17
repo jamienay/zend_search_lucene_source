@@ -34,6 +34,7 @@ class ZendSearchLuceneSource extends DataSource {
     	$this->__loadIndex($this->indexDirectory . $this->indexFile);
         
 		Zend_Search_Lucene_Search_QueryParser::setDefaultEncoding(strtolower(Configure::read('App.encoding')));
+		Zend_Search_Lucene_Analysis_Analyzer::setDefault(new Zend_Search_Lucene_Analysis_Analyzer_Common_Utf8Num_CaseInsensitive());
 
 		parent::__construct($config);
     }
