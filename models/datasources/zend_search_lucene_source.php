@@ -1,10 +1,20 @@
 <?php
-class ZendSearchLucene extends DataSource {
+
+App::import('Vendor', 'Zend_Search_Lucene', array('file' => 'Zend' . DS . 'Search' . DS . 'Lucene.php'));
+
+class ZendSearchLuceneSource extends DataSource {
+
     public $description = 'Zend_Search_Lucene index interface';
     
     public $indexFile = null;
+
+	public $indexDirectory = null;
     
     protected $_schema = array(
+		'id' => array(
+			'type' => 'integer',
+			'length' => 10,
+		),
     	'document' => array()
     );
     
@@ -16,32 +26,49 @@ class ZendSearchLucene extends DataSource {
     public function __construct($config) {
     	$this->indexFile = $config['indexFile'];
     	$this->__setSources($config['source']);
-    	$this->__loadIndex(TMP.$this->indexFile);
-        parent::__construct($config);
+		
+		$this->indexDirectory = TMP;
+		if (!empty($config['indexDirectory'])) {
+			$this->indexDirectory = $config['indexDirectory'];
+		}
+    	$this->__loadIndex($this->indexDirectory . $this->indexFile);
+        
+		Zend_Search_Lucene_Search_QueryParser::setDefaultEncoding(strtolower(Configure::read('App.encoding')));
+		
+		if (!empty($config['analyzer'])) {
+			Zend_Search_Lucene_Analysis_Analyzer::setDefault(new $config['analyzer']());
+		}
+
+		parent::__construct($config);
     }
 
 	public function read(&$model, $queryData = array()) {
-		$items = $this->__readData(&$model, $queryData);
-		if ($items) {
-			$items = $this->__getPage($items, $queryData);
-			
-			// A request for a count (from paginate or otherwise).
-			if ( Set::extract($queryData, 'fields') == '__count' ) {
-				return array(array($model->alias => array('count' => count($items))));
+		$this->_startLog();
+		
+		try {
+			$items = $this->__readData(&$model, $queryData);
+			if ($items) {
+				$items = $this->__getPage($items, $queryData);
+				$this->numRows = count($items);
 			}
-		} else {
-			// A request for a count (from paginate or otherwise).
-			if (Set::extract($queryData, 'fields') == '__count') {
-				return array(array($model->alias => array('count' => count($items))));
-			}
+		} catch (Zend_Exception $e) {
+			$this->error = $e->getMessage();
+			$items = false;
 		}
-	
+
+		if (Set::extract($queryData, 'fields') == '__count') {
+			$items = array(array($model->alias => array('count' => count($items))));
+		}
+
+		$this->_closeLog();
+
 		return $items;
 	}
 
 	public function delete(&$model, $id = null) {
+		$id = current((array)$id);
 		if (!$id) {
-			return $this->__delete();
+			return false;
 		}
 		
 		return $this->__delete($id);
@@ -79,19 +106,20 @@ class ZendSearchLucene extends DataSource {
 	
 	}
 	
-	/**
-	 * This is just here, empty log array and all, for DebugKit compatibility.
-	 */
-	public function getLog() {
-		return array('log' => array());
-	}
-	
 	public function describe(&$model) {
 		return $this->_schema;
 	}
 	
 	public function listSources() {
 		return $this->sources;
+	}
+	
+	public function setMergeFactor($num) {
+		$this->__index->setMergeFactor($num);
+	}
+	
+	public function optimize() {
+		$this->__index->optimize();
 	}
 	
 	private function __createSearchDocument() {
@@ -107,7 +135,16 @@ class ZendSearchLucene extends DataSource {
     	if (isset($queryData['highlight']) && $queryData['highlight'] == true) {
     		$highlight = true;
     	}
+		
+		$limit = 1000;
+		if (!empty($queryData['limit'])) {
+			$limit = $queryData['limit'];
+		}
+
     	$query = $this->__parseQuery($queryData);
+
+		Zend_Search_Lucene::setResultSetLimit($limit);
+
 		$hits = $this->__index->find($query);
 
 		$data = array();
@@ -122,6 +159,9 @@ class ZendSearchLucene extends DataSource {
 					$returnArray[$field->name] = $hit->{$field->name};
 				}
 			}
+			
+			$returnArray['id'] = $hit->id;
+			$returnArray['score'] = $hit->score;
 
 			$data[$i][$model->alias] = $returnArray;
 		}
@@ -129,7 +169,20 @@ class ZendSearchLucene extends DataSource {
 	}
 	
 	private function __parseQuery($queryData) {
-		$queryString = $queryData['conditions']['query'];
+		if (isset($queryData['conditions']['query'])) {
+			$queryString = $queryData['conditions']['query'];
+		} else {
+			$conditions = array();
+			foreach ($queryData['conditions'] as $key => $val) {
+				if (strpos($key, '.') !== false) {
+					list(, $key) = explode('.', $key, 2);
+				}
+				$conditions[] = "$key:$val";
+			}
+			$queryString = join(' ', $conditions);
+		}
+		$this->query = $queryString;
+
     	return Zend_Search_Lucene_Search_QueryParser::parse($queryString);
 	}
 	
@@ -145,7 +198,7 @@ class ZendSearchLucene extends DataSource {
 	
 	private function __delete($index = null) {
 		if (!$index) {
-			return $this->__createIndex(TMP.$this->indexFile);
+			return $this->__createIndex($this->indexDirectory . $this->indexFile);
 		} else {
 			return $this->__index->delete($index);
 		}
@@ -188,6 +241,51 @@ class ZendSearchLucene extends DataSource {
     	return $this->sources;
     }
 
+	protected function _startLog() {
+		$this->__queryStart = microtime(true);
+		$this->query = $this->error = $this->affected = $this->numRows = $this->took = null;
+	}
+
+	protected function _closeLog() {
+		if (!isset($this->__queryStart)) {
+			trigger_error('Was asked to close log, but log was not started.');
+		}
+		
+		$this->took = round((microtime(true) - $this->__queryStart) * 1000);
+		$this->__queryStart = null;
+		$this->_queriesTime += $this->took;
+		$this->_queriesCnt++;
+		
+		if ($this->numRows === null) {
+			$this->numRows = 0;
+		}
+		if (!$this->error) {
+			$this->error = false;
+		}
+		
+		$this->_queriesLog[] = array(
+			'query'		=> $this->query,
+			'error'		=> $this->error,
+			'affected'	=> $this->affected,
+			'numRows'	=> $this->numRows,
+			'took'		=> $this->took,
+		);
+	}
+	
+	public function getLog($sorted = false, $clear = true) {
+		$log = $this->_queriesLog;
+
+		if ($sorted) {
+			$log = sortByKey($log, 'took', 'desc', SORT_NUMERIC);
+		}
+
+		if ($clear) {
+			$this->_queriesLog = array();
+		}
+		
+		return array('log' => $log, 'count' => $this->_queriesCnt, 'time' => $this->_queriesTime);
+	}
+	
 }
 
 ?>
